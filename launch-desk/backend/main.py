@@ -1,3 +1,5 @@
+import json
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -26,13 +28,11 @@ async def health() -> dict[str, str]:
 
 
 def sse(event_type: str, payload: dict) -> bytes:
-    import json
     return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
 @app.post("/api/launch/stream")
 async def launch_stream(brief: LaunchBrief) -> StreamingResponse:
-    import uuid
     request_id = f"launch-{uuid.uuid4().hex[:12]}"
 
     async def generate():
@@ -45,14 +45,14 @@ async def launch_stream(brief: LaunchBrief) -> StreamingResponse:
                 run_config=run_config(group_id=request_id),
                 max_turns=8,
             )
+
             async for event in result.stream_events():
                 if event.type == "run_item_stream_event":
-                    item_type = getattr(event.item, "type", "")
-                    if item_type == "tool_call_item":
+                    if event.name == "tool_called":
                         raw_item = getattr(event.item, "raw_item", None)
-                        name = getattr(raw_item, "name", "tool")
+                        name = getattr(raw_item, "name", None) or "tool"
                         yield sse("tool_progress", {"tool": name, "status": "started"})
-                    elif item_type == "tool_call_output_item":
+                    elif event.name == "tool_output":
                         yield sse("tool_progress", {"tool": "tool", "status": "completed"})
                 elif event.type == "raw_response_event":
                     data = event.data
@@ -60,8 +60,12 @@ async def launch_stream(brief: LaunchBrief) -> StreamingResponse:
                         delta = getattr(data, "delta", "")
                         if delta:
                             yield sse("text_delta", {"delta": delta})
+
             if result.run_loop_exception:
                 raise result.run_loop_exception
+            if not result.is_complete:
+                raise RuntimeError("Launch Desk stream ended before the agent run completed.")
+
             final = result.final_output
             if hasattr(final, "model_dump"):
                 final = final.model_dump()
