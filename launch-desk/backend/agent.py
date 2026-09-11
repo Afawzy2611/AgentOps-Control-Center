@@ -11,7 +11,7 @@ from .tools import (
     generate_owner_checklist,
 )
 
-MODEL = os.getenv("LAUNCH_DESK_MODEL", "gpt-5.6-terra")
+MODEL = os.getenv("LAUNCH_DESK_MODEL", "gpt-6-astra")
 
 INSTRUCTIONS = """
 You are Launch Desk, an engineering launch-planning agent.
