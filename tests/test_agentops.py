@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from app.agentops import run_demo
 
 
@@ -61,6 +63,62 @@ def test_agents_sdk_agent_fleet_has_expected_roles():
     assert AGENT_ROLES == [
         "Developer", "Security", "QA", "Data", "Research", "Governance", "Observability", "Review"
     ]
+
+
+def test_manager_defers_specialist_agent_tools_and_adds_tool_search(monkeypatch):
+    import sys
+
+    created = []
+
+    class FakeTool:
+        def __init__(self, name):
+            self.name = name
+            self.defer_loading = False
+            self.namespace = None
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.name = kwargs["name"]
+            created.append(self)
+
+        def as_tool(self, *, tool_name, tool_description):
+            return FakeTool(tool_name)
+
+    class FakeToolSearchTool:
+        name = "tool_search"
+
+    class FakeModelSettings:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    def fake_tool_namespace(*, name, description, tools):
+        for tool in tools:
+            tool.namespace = name
+        return tools
+
+    fake_agents = SimpleNamespace(
+        Agent=FakeAgent,
+        Runner=object,
+        ModelSettings=FakeModelSettings,
+        ToolSearchTool=FakeToolSearchTool,
+        tool_namespace=fake_tool_namespace,
+    )
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+
+    from app.agents_runtime import build_manager_agent
+
+    manager = build_manager_agent(model="gpt-5.6")
+    tools = manager.kwargs["tools"]
+    specialist_tools = [tool for tool in tools if getattr(tool, "name", "") != "tool_search"]
+    search_tools = [tool for tool in tools if getattr(tool, "name", "") == "tool_search"]
+
+    assert len(search_tools) == 1
+    assert len(specialist_tools) == 7
+    assert all(tool.defer_loading is True for tool in specialist_tools)
+    assert {tool.namespace for tool in specialist_tools} == {"agentops_specialists"}
+    assert manager.kwargs["model_settings"].tool_choice == "auto"
+    assert "tool_search" not in str(manager.kwargs.get("instructions", "")).lower() or "load" in manager.kwargs["instructions"].lower()
 
 
 def test_sdk_report_uses_deterministic_policy_gate():
