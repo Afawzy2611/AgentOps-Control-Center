@@ -88,6 +88,10 @@ def test_manager_defers_specialist_agent_tools_and_adds_tool_search(monkeypatch)
     class FakeToolSearchTool:
         name = "tool_search"
 
+    class FakeModelSettings:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
     def fake_tool_namespace(*, name, description, tools):
         for tool in tools:
             tool.namespace = name
@@ -96,6 +100,7 @@ def test_manager_defers_specialist_agent_tools_and_adds_tool_search(monkeypatch)
     fake_agents = SimpleNamespace(
         Agent=FakeAgent,
         Runner=object,
+        ModelSettings=FakeModelSettings,
         ToolSearchTool=FakeToolSearchTool,
         tool_namespace=fake_tool_namespace,
     )
@@ -112,6 +117,7 @@ def test_manager_defers_specialist_agent_tools_and_adds_tool_search(monkeypatch)
     assert len(specialist_tools) == 7
     assert all(tool.defer_loading is True for tool in specialist_tools)
     assert {tool.namespace for tool in specialist_tools} == {"agentops_specialists"}
+    assert manager.kwargs["model_settings"].tool_choice == "auto"
     assert "tool_search" not in str(manager.kwargs.get("instructions", "")).lower() or "load" in manager.kwargs["instructions"].lower()
 
 
