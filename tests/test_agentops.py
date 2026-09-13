@@ -60,14 +60,11 @@ def test_agents_sdk_runtime_selection_is_explicit(monkeypatch):
 
 def test_agents_sdk_agent_fleet_has_expected_roles():
     from app.agents_runtime import AGENT_ROLES
-    assert AGENT_ROLES == [
-        "Developer", "Security", "QA", "Data", "Research", "Governance", "Observability", "Review"
-    ]
+    assert AGENT_ROLES == ["Developer", "Security", "QA", "Data", "Research", "Governance", "Observability", "Review"]
 
 
 def test_manager_defers_specialist_agent_tools_and_adds_tool_search(monkeypatch):
     import sys
-
     created = []
 
     class FakeTool:
@@ -97,17 +94,10 @@ def test_manager_defers_specialist_agent_tools_and_adds_tool_search(monkeypatch)
             tool.namespace = name
         return tools
 
-    fake_agents = SimpleNamespace(
-        Agent=FakeAgent,
-        Runner=object,
-        ModelSettings=FakeModelSettings,
-        ToolSearchTool=FakeToolSearchTool,
-        tool_namespace=fake_tool_namespace,
-    )
+    fake_agents = SimpleNamespace(Agent=FakeAgent, Runner=object, ModelSettings=FakeModelSettings, ToolSearchTool=FakeToolSearchTool, tool_namespace=fake_tool_namespace)
     monkeypatch.setitem(sys.modules, "agents", fake_agents)
 
     from app.agents_runtime import build_manager_agent
-
     manager = build_manager_agent(model="gpt-5.6")
     tools = manager.kwargs["tools"]
     specialist_tools = [tool for tool in tools if getattr(tool, "name", "") != "tool_search"]
@@ -121,28 +111,30 @@ def test_manager_defers_specialist_agent_tools_and_adds_tool_search(monkeypatch)
     assert "tool_search" not in str(manager.kwargs.get("instructions", "")).lower() or "load" in manager.kwargs["instructions"].lower()
 
 
+def test_external_evidence_tools_are_deferred_and_named(monkeypatch):
+    import sys
+
+    class FakeTool:
+        def __init__(self, name):
+            self.name = name
+            self.defer_loading = False
+
+    def fake_function_tool(func, **kwargs):
+        return FakeTool(kwargs["name_override"])
+
+    monkeypatch.setitem(sys.modules, "agents", SimpleNamespace(function_tool=fake_function_tool))
+    from app.agents_runtime import build_external_evidence_tools
+
+    tools = build_external_evidence_tools(SimpleNamespace(), SimpleNamespace(), ["github"])
+    assert {tool.name for tool in tools} == {"external_github_inspect_connector", "external_github_read_skill_docs", "external_github_execute"}
+    assert all(tool.defer_loading is True for tool in tools)
+
+
 def test_sdk_report_uses_deterministic_policy_gate():
     from app.agentops import build_run_from_sdk_report
     report = {
         "summary": "live manager summary",
-        "reports": [
-            {
-                "agent": "Security",
-                "role": "Security & Threat Modeling",
-                "status": "REVIEW",
-                "summary": "Authorization risk found.",
-                "score": 60,
-                "findings": [{
-                    "severity": "HIGH",
-                    "category": "Authorization",
-                    "title": "Authorization gap",
-                    "detail": "Cross-tenant access risk.",
-                    "recommendation": "Enforce tenant authorization.",
-                    "owner": "Security",
-                    "status": "OPEN"
-                }]
-            }
-        ]
+        "reports": [{"agent": "Security", "role": "Security & Threat Modeling", "status": "REVIEW", "summary": "Authorization risk found.", "score": 60, "findings": [{"severity": "HIGH", "category": "Authorization", "title": "Authorization gap", "detail": "Cross-tenant access risk.", "recommendation": "Enforce tenant authorization.", "owner": "Security", "status": "OPEN"}]}]
     }
     data = build_run_from_sdk_report("Example", report)
     assert data["runtime"] == "agents_sdk"
