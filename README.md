@@ -13,6 +13,9 @@ A safe, deterministic demonstration of a production-oriented multi-agent enginee
 - JSON export endpoint
 - Responsive control-center UI
 - TDD regression suite
+- Optional external evidence layer with an Airbyte Agent SDK adapter
+- Default-deny external connector authorization, bounded retries/output, provenance and audit metadata
+- Deferred external evidence tools for the OpenAI Agents SDK
 
 ## Run
 ```bash
@@ -39,6 +42,18 @@ The repository tracks `mattpocock/skills` as a development-only Git submodule un
 This build intentionally does **not** call an external model and does not require an API key. The project includes an isolated OpenAI Agents SDK runtime that adds manager/specialist orchestration while preserving the deterministic policy engine and human approval boundary. OpenAI's current Agents SDK supports these primitives and multi-agent orchestration. See the official documentation.
 
 Before enabling live model calls, credentials and production action permissions must be explicitly configured.
+
+## External evidence / Airbyte
+
+The external evidence layer is optional and does not change the deterministic release gate. The Airbyte adapter imports the Airbyte Agent SDK lazily, exposes only the progressive read-oriented operations (`inspect_connector`, `read_skill_docs`, and `execute`), rejects non-read connector actions, bounds returned text, retries only transient provider failures, and emits provenance/audit metadata without recording secrets.
+
+Install the optional provider dependency only when using the adapter:
+
+```bash
+pip install airbyte-agent-sdk
+```
+
+Configure an explicit `EvidencePolicy` allowlist before constructing `AirbyteEvidenceProvider`. Do not place connector credentials or tokens in source control or audit records. Airbyte's current Agent SDK supports OpenAI Agents integration and its recommended connector flow is inspect → read skill docs → execute. citeturn0search0turn0search3
 
 ## Agents SDK runtime
 
