@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Launch Desk</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">ENGINEERING RELEASE WORKBENCH</div>
+        <h1>Launch Desk</h1>
+        <p>Turn a rough launch idea into a prioritized release plan.</p>
+      </div>
+      <div class="status"><span class="dot"></span> Agents SDK</div>
+    </header>
+
+    <section class="grid">
+      <form id="brief-form" class="panel form-panel">
+        <div class="panel-head"><div><span class="step">01</span><h2>Launch brief</h2></div></div>
+        <label>Product brief<textarea id="product_brief" required placeholder="What are you launching, what changed, and why now?"></textarea></label>
+        <label>Audience<input id="audience" required placeholder="Who should care or act?"></label>
+        <label>Launch date<input id="launch_date" required placeholder="e.g. 2026-10-15"></label>
+        <label>Constraints<textarea id="constraints" placeholder="Dependencies, approvals, budget, compliance, staffing, timing..."></textarea></label>
+        <label>Available assets<textarea id="available_assets" placeholder="Docs, demos, screenshots, email list, landing page, videos..."></textarea></label>
+        <button type="submit" id="submit">Build launch plan <span>→</span></button>
+      </form>
+
+      <section class="panel output-panel">
+        <div class="panel-head"><div><span class="step">02</span><h2>Live plan</h2></div><span id="score" class="score">—</span></div>
+        <div id="progress" class="progress">Ready for a launch brief.</div>
+        <div id="tool-log" class="tool-log"></div>
+        <pre id="stream" class="stream">Your plan will appear here as Launch Desk works.</pre>
+        <div id="result" class="result hidden"></div>
+      </section>
+    </section>
+
+    <footer>Launch Desk keeps tool execution deterministic and side-effect free. Final launch decisions remain with the team.</footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
