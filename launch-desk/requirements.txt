@@ -1,6 +1,6 @@
-fastapi>=0.116
-uvicorn[standard]>=0.35
-openai-agents>=0.20.0
-pydantic>=2.10
-pytest>=8.0
-httpx>=0.28
+fastapi>=0.141.1
+uvicorn[standard]>=0.53.0
+openai-agents>=0.22.2
+pydantic>=2.13.5
+pytest>=9.1.1
+httpx>=0.28.1

@@ -79,6 +79,7 @@ def build_external_evidence_tools(provider: Any, policy: Any, connectors: Iterab
 
         for suffix, function in (("inspect_connector", inspect), ("read_skill_docs", read_skill_docs), ("execute", execute_read)):
             tool = function_tool(function, name_override=f"external_{connector_name}_{suffix}", description_override=f"Read-only external evidence operation for the {connector} connector.", strict_mode=False, defer_loading=True)
+            tool.defer_loading = True
             tools.append(tool)
     return tools
 
