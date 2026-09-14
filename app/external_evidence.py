@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import json
 from enum import Enum
 from typing import Any, Protocol
 
@@ -85,29 +86,51 @@ def _redacted_arguments(arguments):
     return {key: "[REDACTED]" for key in arguments if any(token in key.lower() for token in secret_tokens)}
 
 
+def _bounded_payload(payload, max_chars):
+    if isinstance(payload, str):
+        return bounded_text(payload, max_chars)
+    try:
+        serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        serialized = str(payload)
+    if len(serialized) > max_chars:
+        return serialized[:max_chars], True
+    return payload, False
+
+
+def _audit_provenance(provider, connector, operation, arguments, provider_provenance):
+    provenance = dict(provider_provenance or {})
+    provenance.update({
+        "provider": provider,
+        "connector": connector,
+        "operation": operation,
+        "redacted_arguments": _redacted_arguments(arguments),
+    })
+    return provenance
+
+
 def execute_evidence_operation(provider, policy, connector, operation, arguments, retry_policy, max_output_chars=100_000):
     decision = authorize_operation(policy, provider.provider_name, connector, operation)
     if decision is AuthorizationDecision.DENIED:
         evidence = ExternalEvidence(provider.provider_name, connector, operation, EvidenceStatus.FAILED, error="Operation denied by external evidence policy")
-        return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, 0, provenance={"redacted_arguments": _redacted_arguments(arguments)}, error=evidence.error)
+        return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, 0, provenance=_audit_provenance(provider.provider_name, connector, operation, arguments, {}), error=evidence.error)
 
     attempts = 0
     while True:
         try:
             evidence = provider.execute(connector, operation, arguments)
-            payload = evidence.payload
-            truncated = evidence.truncated
-            if isinstance(payload, str):
-                payload, truncated = bounded_text(payload, max_output_chars)
-            evidence = ExternalEvidence(provider.provider_name, connector, operation, EvidenceStatus.SUCCESS, payload, evidence.provenance, retry_count=attempts, truncated=truncated)
-            return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, attempts, evidence.provenance, truncated=truncated)
+            payload, truncated = _bounded_payload(evidence.payload, max_output_chars)
+            truncated = evidence.truncated or truncated
+            provenance = _audit_provenance(provider.provider_name, connector, operation, arguments, evidence.provenance)
+            evidence = ExternalEvidence(provider.provider_name, connector, operation, EvidenceStatus.SUCCESS, payload, provenance, retry_count=attempts, truncated=truncated)
+            return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, attempts, provenance, truncated=truncated)
         except retry_policy.retryable_exceptions as exc:
             if attempts >= max(0, retry_policy.max_retries):
                 error_name = type(exc).__name__
                 evidence = ExternalEvidence(provider.provider_name, connector, operation, EvidenceStatus.FAILED, retry_count=attempts, error=error_name)
-                return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, attempts, error=error_name)
+                return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, attempts, provenance=_audit_provenance(provider.provider_name, connector, operation, arguments, {}), error=error_name)
             attempts += 1
         except Exception as exc:
             error_name = type(exc).__name__
             evidence = ExternalEvidence(provider.provider_name, connector, operation, EvidenceStatus.FAILED, retry_count=attempts, error=error_name)
-            return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, attempts, error=error_name)
+            return evidence, AuditEvent(provider.provider_name, connector, operation, decision, evidence.status, attempts, provenance=_audit_provenance(provider.provider_name, connector, operation, arguments, {}), error=error_name)
