@@ -49,6 +49,17 @@ def test_structured_payload_at_limit_is_not_truncated():
     assert evidence.payload == {"items": ["abc"]}
 
 
+def test_success_audit_provenance_is_stable_and_secret_safe():
+    provider = FakeProvider(payload={"ok": True})
+    policy = EvidencePolicy({("airbyte", "github", "read"): True})
+    _, audit = execute_evidence_operation(provider, policy, "github", "read", {"token": "SECRET_TOKEN", "query": "bug"}, RetryPolicy(max_retries=0), max_output_chars=100)
+    assert audit.provenance["provider"] == "airbyte"
+    assert audit.provenance["connector"] == "github"
+    assert audit.provenance["operation"] == "read"
+    assert audit.provenance["redacted_arguments"]["token"] == "[REDACTED]"
+    assert "SECRET_TOKEN" not in str(audit.__dict__)
+
+
 class FakeProvider:
     provider_name = "airbyte"
 
