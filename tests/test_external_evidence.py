@@ -32,20 +32,38 @@ def test_bounded_text_marks_truncation():
     assert truncated is True
 
 
+def test_structured_payload_is_bounded_and_marked_truncated():
+    provider = FakeProvider(payload={"items": ["abcdefghij", "klmnopqrst"]})
+    policy = EvidencePolicy({("airbyte", "github", "read"): True})
+    evidence, _ = execute_evidence_operation(provider, policy, "github", "read", {}, RetryPolicy(max_retries=0), max_output_chars=24)
+    assert evidence.truncated is True
+    assert len(str(evidence.payload)) <= 24
+
+
+def test_structured_payload_at_limit_is_not_truncated():
+    provider = FakeProvider(payload={"items": ["abc"]})
+    policy = EvidencePolicy({("airbyte", "github", "read"): True})
+    expected = '{"items":["abc"]}'
+    evidence, _ = execute_evidence_operation(provider, policy, "github", "read", {}, RetryPolicy(max_retries=0), max_output_chars=len(expected))
+    assert evidence.truncated is False
+    assert evidence.payload == {"items": ["abc"]}
+
+
 class FakeProvider:
     provider_name = "airbyte"
 
-    def __init__(self):
+    def __init__(self, payload="abcdefgh"):
         self.calls = 0
+        self.payload = payload
 
     def inspect_capability(self, connector):
         return {"connector": connector, "operations": ["read"]}
 
     def execute(self, connector, operation, arguments):
         self.calls += 1
-        if self.calls < 3:
+        if self.calls < 3 and self.payload == "abcdefgh":
             raise TimeoutError("temporary timeout")
-        return ExternalEvidence.success("airbyte", connector, operation, "abcdefgh")
+        return ExternalEvidence.success("airbyte", connector, operation, self.payload)
 
 
 def test_transient_failures_are_retried_with_a_bounded_count():
