@@ -1,5 +1,6 @@
 [build]
 builder = "RAILPACK"
+buildCommand = "python -m pip install -r requirements.txt && pytest -q && python -m pip install -r launch-desk/requirements.txt && (cd launch-desk && pytest -q)"
 
 [deploy]
 startCommand = "python -m app.server"
