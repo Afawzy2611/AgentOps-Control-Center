@@ -30,7 +30,6 @@ def test_index_html_esc_uses_x26_entity_escapes_not_identity():
     assert r"\x26lt;" in body
     assert r"\x26gt;" in body
     assert r"\x26quot;" in body
-    # Identity mapping bug regression.
     assert "{'&':'&'," not in body
 
 
