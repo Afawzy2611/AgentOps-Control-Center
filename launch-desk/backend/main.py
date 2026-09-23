@@ -6,7 +6,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from agents import Runner
 
@@ -16,6 +16,9 @@ from .models import LaunchBrief
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
+
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+PUBLIC_API_PATHS = frozenset({"/api/health"})
 
 
 @asynccontextmanager
@@ -40,6 +43,17 @@ async def require_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail=err or "unauthorized")
 
 
+@app.middleware("http")
+async def deny_by_default_api_auth(request: Request, call_next):
+    """Require auth for all /api/* routes except the explicit public allow-list."""
+    path = request.url.path
+    if path.startswith("/api/") and path not in PUBLIC_API_PATHS:
+        ok, err = authorize_headers(request.headers, bind_host=os.getenv("HOST", "127.0.0.1"))
+        if not ok:
+            return JSONResponse({"detail": err or "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
@@ -48,12 +62,15 @@ async def index() -> FileResponse:
 @app.get("/api/health")
 async def health() -> dict:
     host = os.getenv("HOST", "127.0.0.1")
-    return {
+    payload = {
         "status": "ok",
         "service": "launch-desk",
-        "auth_required": require_auth_enabled(bind_host=host),
-        "api_key_configured": get_configured_api_key() is not None,
     }
+    # Strip detailed auth posture from public health on non-loopback binds.
+    if host.strip().lower() in _LOOPBACK:
+        payload["auth_required"] = require_auth_enabled(bind_host=host)
+        payload["api_key_configured"] = get_configured_api_key() is not None
+    return payload
 
 
 def sse(event_type: str, payload: dict) -> bytes:
