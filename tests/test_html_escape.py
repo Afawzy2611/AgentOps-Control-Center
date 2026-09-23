@@ -9,10 +9,10 @@ INDEX = Path(__file__).resolve().parents[1] / "app" / "static" / "index.html"
 
 # Mirror of the browser esc() map used in app/static/index.html.
 _ESC_MAP = {
-    "&": "&",
-    "<": "<",
-    ">": ">",
-    '"': """,
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
     "'": "&#39;",
 }
 
@@ -29,17 +29,17 @@ def test_index_html_esc_uses_html_entities_not_identity():
         match = re.search(r"function esc\(s\)\{[^\n]+\}", source)
     assert match, "esc() function missing from index.html"
     body = match.group(0)
-    assert "&" in body and "<" in body and ">" in body and """ in body
+    assert "&amp;" in body and "&lt;" in body and "&gt;" in body and "&quot;" in body
     # Identity mapping bug regression: must not map &→& / <→< literally as values.
     assert "{'&':'&'," not in body
-    assert "{'&':'&'" in body
+    assert "{'&':'&amp;'" in body
 
 
 def test_esc_escapes_xss_ish_finding_title():
     title = '<script>alert("xss")</script>'
     out = esc(title)
     assert "<script>" not in out
-    assert "<script>" in out
-    assert ""xss"" in out
-    assert esc("a & b < c > d") == "a & b < c > d"
+    assert "&lt;script&gt;" in out
+    assert "&quot;xss&quot;" in out
+    assert esc("a & b < c > d") == "a &amp; b &lt; c &gt; d"
     assert esc("it's") == "it&#39;s"
