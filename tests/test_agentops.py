@@ -142,3 +142,68 @@ def test_sdk_report_uses_deterministic_policy_gate():
     assert data["approval"]["allowed"] is False
     assert data["security"]["destructive_actions"] == "disabled"
     assert data["agent_runtime_summary"] == "live manager summary"
+
+
+def test_lowercase_critical_blocks_release():
+    from app.agentops import Finding, AgentResult, review_agent, normalize_severity
+    assert normalize_severity("critical") == "CRITICAL"
+    assert normalize_severity(" CRITICAL ") == "CRITICAL"
+    assert normalize_severity("weird") == "CRITICAL"
+    result = AgentResult(
+        "Security", "Security", "REVIEW", "case check",
+        [Finding("critical", "Authorization", "Lowercase critical", "detail", "fix it", "Security")],
+        50, 1,
+    )
+    review = review_agent([result])
+    assert review.status == "BLOCKED"
+    assert result.findings[0].severity == "CRITICAL"
+
+
+def test_uppercase_critical_blocks_release():
+    from app.agentops import Finding, AgentResult, review_agent
+    result = AgentResult(
+        "Security", "Security", "REVIEW", "case check",
+        [Finding("CRITICAL", "Authorization", "Uppercase critical", "detail", "fix it", "Security")],
+        50, 1,
+    )
+    review = review_agent([result])
+    assert review.status == "BLOCKED"
+
+
+def test_sdk_report_normalizes_mixed_case_severity():
+    from app.agentops import build_run_from_sdk_report
+    report = {
+        "summary": "mixed case",
+        "reports": [{
+            "agent": "Security",
+            "role": "Security & Threat Modeling",
+            "status": "REVIEW",
+            "summary": "risk",
+            "score": 40,
+            "findings": [{
+                "severity": "high",
+                "category": "Authorization",
+                "title": "Mixed case high",
+                "detail": "should block",
+                "recommendation": "normalize",
+                "owner": "Security",
+                "status": "OPEN",
+            }],
+        }],
+    }
+    data = build_run_from_sdk_report("Example", report)
+    assert data["release_status"] == "BLOCKED"
+    assert data["findings"][0]["severity"] == "HIGH"
+    assert data["approval"]["allowed"] is False
+
+
+def test_unknown_severity_fail_closed():
+    from app.agentops import Finding, AgentResult, review_agent
+    result = AgentResult(
+        "Security", "Security", "REVIEW", "unknown sev",
+        [Finding("ultra", "Authorization", "Unknown severity", "detail", "block", "Security")],
+        50, 1,
+    )
+    review = review_agent([result])
+    assert result.findings[0].severity == "CRITICAL"
+    assert review.status == "BLOCKED"
