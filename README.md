@@ -72,4 +72,4 @@ Configure an explicit `EvidencePolicy` allowlist before constructing `AirbyteEvi
 
 ## Agents SDK runtime
 
-The project includes an isolated OpenAI Agents SDK runtime behind `AGENT_RUNTIME`. The deterministic runtime remains the reference implementation and rollback path. Set `AGENT_RUNTIME=agents_sdk` only after installing `openai-agents` and configuring `OPENAI_API_KEY`. `POST /api/run` selects the configured runtime; `POST /api/run-demo` remains deterministic.
+The project includes an isolated OpenAI Agents SDK runtime behind `AGENT_RUNTIME`. The deterministic runtime remains the reference implementation and rollback path. Set `AGENT_RUNTIME=agents_sdk` only after installing `openai-agents` (>=0.22.0, compatible with OpenAI Agents SDK 0.22.x) and configuring `OPENAI_API_KEY`. Copy `.env.example` to `.env` for `OPENAI_API_KEY` and `AGENTOPS_API_KEY` placeholders — never commit real keys. `POST /api/run` selects the configured runtime; `POST /api/run-demo` remains deterministic.
