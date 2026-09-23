@@ -1,14 +1,52 @@
 import json
 import os
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
-from .agentops import run_demo, build_run_from_sdk_report
+from urllib.parse import parse_qs, urlparse
+
+from .agentops import build_run_from_sdk_report, run_demo
+from .auth import authorize_request, get_configured_api_key, require_auth_enabled, warn_if_auth_disabled
 from .runtime import get_runtime
 
 ROOT = Path(__file__).parent
 INDEX = ROOT / "static" / "index.html"
-LAST_RUN = None
+
+_RUNS_LOCK = threading.Lock()
+_RUNS: dict[str, dict] = {}
+_MAX_RUNS = 100
+
+# Public routes that never require an API key.
+PUBLIC_PATHS = frozenset({"/", "/api/health"})
+# Mutating and data-export routes that require auth when the gate is active.
+PROTECTED_PATHS = frozenset({
+    "/api/state",
+    "/api/export",
+    "/api/run",
+    "/api/run-demo",
+    "/api/decision",
+})
+
+
+def _store_run(run: dict) -> dict:
+    with _RUNS_LOCK:
+        _RUNS[run["run_id"]] = run
+        while len(_RUNS) > _MAX_RUNS:
+            oldest = next(iter(_RUNS))
+            _RUNS.pop(oldest, None)
+    return run
+
+
+def _get_run(run_id: str | None) -> dict | None:
+    if not run_id:
+        return None
+    with _RUNS_LOCK:
+        return _RUNS.get(run_id)
+
+
+def _run_count() -> int:
+    with _RUNS_LOCK:
+        return len(_RUNS)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -21,69 +59,147 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _json_error(self, status: int, message: str):
+        self._send(status, json.dumps({"error": message}))
+
+    def _check_auth(self, path: str) -> bool:
+        if path in PUBLIC_PATHS or path not in PROTECTED_PATHS:
+            return True
+        ok, err = authorize_request(self.headers, bind_host=os.getenv("HOST", "0.0.0.0"))
+        if ok:
+            return True
+        self._json_error(401, err or "unauthorized")
+        return False
+
+    def _read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            payload = json.loads(raw or b"{}")
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def do_GET(self):
-        global LAST_RUN
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if not self._check_auth(path):
+            return
         if path == "/":
             self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
         elif path == "/api/health":
             runtime = get_runtime()
-            self._send(200, json.dumps({"status": "ok", "mode": "safe-demo", "runtime": runtime.name,
-                                       "runtime_available": runtime.available, "run_available": LAST_RUN is not None,
-                                       "external_actions_enabled": False}))
+            self._send(200, json.dumps({
+                "status": "ok",
+                "mode": "safe-demo",
+                "runtime": runtime.name,
+                "runtime_available": runtime.available,
+                "run_count": _run_count(),
+                "auth_required": require_auth_enabled(bind_host=os.getenv("HOST", "0.0.0.0")),
+                "api_key_configured": get_configured_api_key() is not None,
+                "external_actions_enabled": False,
+            }))
         elif path == "/api/state":
-            self._send(200, json.dumps(LAST_RUN or {"status": "idle"}))
+            qs = parse_qs(parsed.query)
+            run_id = (qs.get("run_id") or [None])[0]
+            run = _get_run(run_id)
+            if run_id and run is None:
+                self._json_error(404, "unknown run_id")
+                return
+            self._send(200, json.dumps(run or {"status": "idle"}))
         elif path == "/api/export":
-            self._send(200, json.dumps(LAST_RUN or {"status": "idle"}, indent=2), "application/json; charset=utf-8")
+            qs = parse_qs(parsed.query)
+            run_id = (qs.get("run_id") or [None])[0]
+            if not run_id:
+                self._json_error(400, "run_id query parameter is required")
+                return
+            run = _get_run(run_id)
+            if run is None:
+                self._json_error(404, "unknown run_id")
+                return
+            self._send(200, json.dumps(run, indent=2), "application/json; charset=utf-8")
         else:
-            self._send(404, json.dumps({"error": "not found"}))
+            self._json_error(404, "not found")
 
     def do_POST(self):
-        global LAST_RUN
         path = urlparse(self.path).path
+        if not self._check_auth(path):
+            return
         if path in {"/api/run-demo", "/api/run"}:
-            length = int(self.headers.get("Content-Length", "0"))
-            try:
-                payload = json.loads(self.rfile.read(length) or b"{}")
-            except json.JSONDecodeError:
-                payload = {}
+            payload = self._read_json()
             project = payload.get("project") or "AgentOps Final Demo"
-            runtime = get_runtime() if path == "/api/run" else type("Runtime", (), {"name": "deterministic", "available": True})()
+            runtime = get_runtime() if path == "/api/run" else type(
+                "Runtime", (), {"name": "deterministic", "available": True}
+            )()
             if not runtime.available:
-                self._send(503, json.dumps({"error": "selected agent runtime is unavailable", "runtime": runtime.name}))
+                self._send(503, json.dumps({
+                    "error": "selected agent runtime is unavailable",
+                    "runtime": runtime.name,
+                }))
                 return
             if runtime.name == "agents_sdk":
                 try:
                     from .agents_runtime import run_manager
                     report = run_manager(project)
                 except Exception as exc:
-                    self._send(502, json.dumps({"error": "agents runtime failed", "detail": str(exc)}))
+                    self._send(502, json.dumps({
+                        "error": "agents runtime failed",
+                        "detail": str(exc),
+                    }))
                     return
-                LAST_RUN = build_run_from_sdk_report(project, report)
-                LAST_RUN["security"]["external_actions_enabled"] = False
-                LAST_RUN["security"]["destructive_actions"] = "disabled"
+                run = build_run_from_sdk_report(project, report)
+                run["security"]["external_actions_enabled"] = False
+                run["security"]["destructive_actions"] = "disabled"
             else:
-                LAST_RUN = run_demo(project, runtime="deterministic")
-            self._send(200, json.dumps(LAST_RUN))
+                run = run_demo(project, runtime="deterministic")
+            run["security"]["api_key_configured"] = get_configured_api_key() is not None
+            _store_run(run)
+            self._send(200, json.dumps(run))
             return
         if path == "/api/decision":
-            length = int(self.headers.get("Content-Length", "0"))
             try:
-                payload = json.loads(self.rfile.read(length) or b"{}")
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                raw = self.rfile.read(length) if length else b"{}"
+                payload = json.loads(raw or b"{}")
             except json.JSONDecodeError:
-                self._send(400, json.dumps({"error": "invalid JSON"})); return
+                self._json_error(400, "invalid JSON")
+                return
+            if not isinstance(payload, dict):
+                self._json_error(400, "invalid JSON")
+                return
             decision = payload.get("decision")
+            run_id = payload.get("run_id")
             if decision not in {"APPROVE", "REJECT", "REQUEST_CHANGES"}:
-                self._send(400, json.dumps({"error": "invalid decision"})); return
-            if LAST_RUN is None:
-                self._send(409, json.dumps({"error": "run analysis before making a decision"})); return
-            if decision == "APPROVE" and not LAST_RUN["approval"]["allowed"]:
-                self._send(409, json.dumps({"decision": decision, "executed": False,
-                    "message": "Approval blocked: resolve CRITICAL/HIGH findings before production approval."})); return
-            LAST_RUN["approval"]["decision"] = decision
-            self._send(200, json.dumps({"decision": decision, "executed": False,
-                "message": "Decision recorded. Safe demo mode executed no external action."})); return
-        self._send(404, json.dumps({"error": "not found"}))
+                self._json_error(400, "invalid decision")
+                return
+            if not run_id:
+                self._json_error(400, "run_id is required")
+                return
+            run = _get_run(run_id)
+            if run is None:
+                self._send(409, json.dumps({
+                    "error": "run analysis before making a decision",
+                    "run_id": run_id,
+                }))
+                return
+            if decision == "APPROVE" and not run["approval"]["allowed"]:
+                self._send(409, json.dumps({
+                    "decision": decision,
+                    "executed": False,
+                    "run_id": run_id,
+                    "message": "Approval blocked: resolve CRITICAL/HIGH findings before production approval.",
+                }))
+                return
+            run["approval"]["decision"] = decision
+            _store_run(run)
+            self._send(200, json.dumps({
+                "decision": decision,
+                "executed": False,
+                "run_id": run_id,
+                "message": "Decision recorded. Safe demo mode executed no external action.",
+            }))
+            return
+        self._json_error(404, "not found")
 
     def log_message(self, fmt, *args):
         print(fmt % args)
@@ -95,6 +211,14 @@ def get_server_config():
 
 def main():
     host, port = get_server_config()
+    warn_if_auth_disabled()
+    if require_auth_enabled(bind_host=host) and not get_configured_api_key():
+        print(
+            "WARNING: Auth is required (REQUIRE_AUTH or non-loopback HOST) but "
+            "AGENTOPS_API_KEY is unset — non-health API routes will return 401."
+        )
+    elif get_configured_api_key():
+        print("API key auth enabled for mutating and export routes.")
     print(f"AgentOps running at http://{host}:{port}")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
