@@ -148,3 +148,34 @@ def test_decision_requires_run_id(http_server):
     status, body = _request(host, port, "POST", "/api/decision", {"decision": "REJECT"})
     assert status == 400
     assert "run_id" in body["error"]
+
+
+def test_deny_by_default_unknown_api_route(http_server, monkeypatch):
+    monkeypatch.setenv("AGENTOPS_API_KEY", "test-key")
+    host, port = http_server
+    status, body = _request(host, port, "GET", "/api/does-not-exist")
+    assert status == 401
+    assert "unauthorized" in body["error"]
+
+
+def test_run_id_is_at_least_token_hex_16(http_server):
+    host, port = http_server
+    status, body = _request(host, port, "POST", "/api/run-demo", {"project": "entropy"})
+    assert status == 200
+    run_id = body["run_id"]
+    # demo-<32 hex chars from secrets.token_hex(16)>
+    assert "-" in run_id
+    entropy = run_id.split("-", 1)[1]
+    assert len(entropy) >= 32
+    int(entropy, 16)  # must be hex
+
+
+def test_health_strips_auth_posture_on_non_loopback(http_server, monkeypatch):
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    monkeypatch.setenv("AGENTOPS_API_KEY", "test-key")
+    host, port = http_server
+    status, body = _request(host, port, "GET", "/api/health")
+    assert status == 200
+    assert body["status"] == "ok"
+    assert "auth_required" not in body
+    assert "api_key_configured" not in body
