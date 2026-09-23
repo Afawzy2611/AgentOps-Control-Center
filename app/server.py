@@ -18,14 +18,7 @@ _MAX_RUNS = 100
 
 # Public routes that never require an API key.
 PUBLIC_PATHS = frozenset({"/", "/api/health"})
-# Mutating and data-export routes that require auth when the gate is active.
-PROTECTED_PATHS = frozenset({
-    "/api/state",
-    "/api/export",
-    "/api/run",
-    "/api/run-demo",
-    "/api/decision",
-})
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _store_run(run: dict) -> dict:
@@ -63,13 +56,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps({"error": message}))
 
     def _check_auth(self, path: str) -> bool:
-        if path in PUBLIC_PATHS or path not in PROTECTED_PATHS:
+        # Deny-by-default for /api/* except the explicit public allow-list.
+        if path in PUBLIC_PATHS:
             return True
-        ok, err = authorize_request(self.headers, bind_host=os.getenv("HOST", "0.0.0.0"))
-        if ok:
-            return True
-        self._json_error(401, err or "unauthorized")
-        return False
+        if path.startswith("/api/"):
+            ok, err = authorize_request(self.headers, bind_host=os.getenv("HOST", "0.0.0.0"))
+            if ok:
+                return True
+            self._json_error(401, err or "unauthorized")
+            return False
+        return True
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -89,16 +85,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
         elif path == "/api/health":
             runtime = get_runtime()
-            self._send(200, json.dumps({
+            bind_host = os.getenv("HOST", "0.0.0.0")
+            payload = {
                 "status": "ok",
                 "mode": "safe-demo",
                 "runtime": runtime.name,
                 "runtime_available": runtime.available,
                 "run_count": _run_count(),
-                "auth_required": require_auth_enabled(bind_host=os.getenv("HOST", "0.0.0.0")),
-                "api_key_configured": get_configured_api_key() is not None,
                 "external_actions_enabled": False,
-            }))
+            }
+            # Strip detailed auth posture from public health on non-loopback binds.
+            if bind_host.strip().lower() in _LOOPBACK:
+                payload["auth_required"] = require_auth_enabled(bind_host=bind_host)
+                payload["api_key_configured"] = get_configured_api_key() is not None
+            self._send(200, json.dumps(payload))
         elif path == "/api/state":
             qs = parse_qs(parsed.query)
             run_id = (qs.get("run_id") or [None])[0]
