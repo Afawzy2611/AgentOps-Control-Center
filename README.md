@@ -23,6 +23,21 @@ A safe, deterministic demonstration of a production-oriented multi-agent enginee
 ```
 Open `http://127.0.0.1:8787`.
 
+
+## Authentication
+
+Mutating and data-export routes (`/api/state`, `/api/export`, `/api/run`, `/api/run-demo`, `/api/decision`, and Launch Desk `/api/launch/stream`) require a shared API key when auth is enabled. `/api/health` stays public.
+
+| Env var | Purpose |
+|---|---|
+| `AGENTOPS_API_KEY` | Shared secret accepted via `Authorization: Bearer …` or `X-API-Key` |
+| `REQUIRE_AUTH` | Set to `1`/`true` to fail closed even on loopback when no key is configured |
+| `HOST` | Non-loopback binds (`0.0.0.0`, etc.) fail closed if `AGENTOPS_API_KEY` is unset |
+
+Local demo on `127.0.0.1`/`localhost` without a key logs a warning and allows unauthenticated access. Public or flagged deployments return `401` until a key is set. The control-center UI reads an optional key from `localStorage.AGENTOPS_API_KEY` (or `window.AGENTOPS_API_KEY`).
+
+Per-run state: `/api/run` and `/api/run-demo` return a `run_id`. `/api/state`, `/api/export`, and `/api/decision` require that `run_id` (query or JSON) and only act on that run.
+
 ## Test
 ```bash
 pytest -q
@@ -53,8 +68,8 @@ Install the optional provider dependency only when using the adapter:
 pip install airbyte-agent-sdk
 ```
 
-Configure an explicit `EvidencePolicy` allowlist before constructing `AirbyteEvidenceProvider`. Do not place connector credentials or tokens in source control or audit records. Airbyte's current Agent SDK supports OpenAI Agents integration and its recommended connector flow is inspect → read skill docs → execute. citeturn0search0turn0search3
+Configure an explicit `EvidencePolicy` allowlist before constructing `AirbyteEvidenceProvider`. Do not place connector credentials or tokens in source control or audit records. Airbyte's current Agent SDK supports OpenAI Agents integration and its recommended connector flow is inspect → read skill docs → execute.
 
 ## Agents SDK runtime
 
-The project includes an isolated OpenAI Agents SDK runtime behind `AGENT_RUNTIME`. The deterministic runtime remains the reference implementation and rollback path. Set `AGENT_RUNTIME=agents_sdk` only after installing `openai-agents` and configuring `OPENAI_API_KEY`. `POST /api/run` selects the configured runtime; `POST /api/run-demo` remains deterministic.
+The project includes an isolated OpenAI Agents SDK runtime behind `AGENT_RUNTIME`. The deterministic runtime remains the reference implementation and rollback path. Set `AGENT_RUNTIME=agents_sdk` only after installing `openai-agents` (>=0.22.0, compatible with OpenAI Agents SDK 0.22.x) and configuring `OPENAI_API_KEY`. Copy `.env.example` to `.env` for `OPENAI_API_KEY` and `AGENTOPS_API_KEY` placeholders — never commit real keys. `POST /api/run` selects the configured runtime; `POST /api/run-demo` remains deterministic.

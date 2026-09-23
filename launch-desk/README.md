@@ -42,6 +42,11 @@ cp .env.example .env
 
 Set `OPENAI_API_KEY` in `.env`. Never commit it.
 
+
+## Authentication
+
+Set `AGENTOPS_API_KEY` to protect `POST /api/launch/stream`. Accept `Authorization: Bearer <key>` or `X-API-Key`. `/api/health` remains public. With `REQUIRE_AUTH=1` or a non-loopback `HOST`, requests fail closed when the key is unset. The frontend sends a key from `localStorage.AGENTOPS_API_KEY` when present.
+
 Optional model selection:
 
 ```text

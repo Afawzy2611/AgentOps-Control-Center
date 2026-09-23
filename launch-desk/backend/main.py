@@ -1,20 +1,57 @@
 import json
+import os
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, StreamingResponse
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from agents import Runner
 
 from .agent import brief_to_input, build_agent, run_config
+from .auth import authorize_headers, get_configured_api_key, require_auth_enabled, warn_if_auth_disabled
 from .models import LaunchBrief
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-app = FastAPI(title="Launch Desk", version="1.0.0")
+_LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+PUBLIC_API_PATHS = frozenset({"/api/health"})
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    warn_if_auth_disabled()
+    host = os.getenv("HOST", "127.0.0.1")
+    if require_auth_enabled(bind_host=host) and not get_configured_api_key():
+        print(
+            "WARNING: Auth is required (REQUIRE_AUTH or non-loopback HOST) but "
+            "AGENTOPS_API_KEY is unset — non-health API routes will return 401."
+        )
+    yield
+
+
+app = FastAPI(title="Launch Desk", version="1.0.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+
+async def require_api_key(request: Request) -> None:
+    ok, err = authorize_headers(request.headers, bind_host=os.getenv("HOST", "127.0.0.1"))
+    if not ok:
+        raise HTTPException(status_code=401, detail=err or "unauthorized")
+
+
+@app.middleware("http")
+async def deny_by_default_api_auth(request: Request, call_next):
+    """Require auth for all /api/* routes except the explicit public allow-list."""
+    path = request.url.path
+    if path.startswith("/api/") and path not in PUBLIC_API_PATHS:
+        ok, err = authorize_headers(request.headers, bind_host=os.getenv("HOST", "127.0.0.1"))
+        if not ok:
+            return JSONResponse({"detail": err or "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 
 @app.get("/")
@@ -23,15 +60,24 @@ async def index() -> FileResponse:
 
 
 @app.get("/api/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "launch-desk"}
+async def health() -> dict:
+    host = os.getenv("HOST", "127.0.0.1")
+    payload = {
+        "status": "ok",
+        "service": "launch-desk",
+    }
+    # Strip detailed auth posture from public health on non-loopback binds.
+    if host.strip().lower() in _LOOPBACK:
+        payload["auth_required"] = require_auth_enabled(bind_host=host)
+        payload["api_key_configured"] = get_configured_api_key() is not None
+    return payload
 
 
 def sse(event_type: str, payload: dict) -> bytes:
     return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
-@app.post("/api/launch/stream")
+@app.post("/api/launch/stream", dependencies=[Depends(require_api_key)])
 async def launch_stream(brief: LaunchBrief) -> StreamingResponse:
     request_id = f"launch-{uuid.uuid4().hex[:12]}"
 

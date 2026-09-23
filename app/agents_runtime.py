@@ -1,6 +1,6 @@
 """OpenAI Agents SDK runtime for AgentOps with optional external evidence tools."""
 
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 AGENT_ROLES = ["Developer", "Security", "QA", "Data", "Research", "Governance", "Observability", "Review"]
 
@@ -25,16 +25,22 @@ def _require_sdk():
 
 def build_specialist_agents(model: str | None = None) -> dict[str, Any]:
     Agent, _, _, _, _ = _require_sdk()
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, field_validator
 
     class FindingModel(BaseModel):
-        severity: str
+        severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
         category: str
         title: str
         detail: str
         recommendation: str
         owner: str
         status: str = "OPEN"
+
+        @field_validator("severity", mode="before")
+        @classmethod
+        def _normalize_severity(cls, value):
+            from .agentops import normalize_severity
+            return normalize_severity(value)
 
     class AgentReport(BaseModel):
         agent: str
@@ -86,18 +92,24 @@ def build_external_evidence_tools(provider: Any, policy: Any, connectors: Iterab
 
 def build_manager_agent(model: str | None = None, external_provider: Any | None = None, external_policy: Any | None = None, external_connectors: Iterable[str] = ()) -> Any:
     Agent, _, ModelSettings, ToolSearchTool, tool_namespace = _require_sdk()
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, field_validator
 
     specialists = build_specialist_agents(model=model)
 
     class FindingModel(BaseModel):
-        severity: str
+        severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
         category: str
         title: str
         detail: str
         recommendation: str
         owner: str
         status: str = "OPEN"
+
+        @field_validator("severity", mode="before")
+        @classmethod
+        def _normalize_severity(cls, value):
+            from .agentops import normalize_severity
+            return normalize_severity(value)
 
     class AgentReport(BaseModel):
         agent: str
