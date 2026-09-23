@@ -25,7 +25,7 @@
 <script>
 const $=id=>document.getElementById(id);
 let currentRunId=null;
-function esc(s){return String(s).replace(/[&<>\"]/g,c=>({'&':'&','<':'<','>':'>','"':'"'}[c]))}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]))}
 function apiKey(){return localStorage.getItem('AGENTOPS_API_KEY')||window.AGENTOPS_API_KEY||'';}
 function authHeaders(extra){const h=Object.assign({'Content-Type':'application/json'},extra||{});const k=apiKey();if(k){h['Authorization']='Bearer '+k;h['X-API-Key']=k;}return h;}
 async function run(){const r=await fetch('/api/run',{method:'POST',headers:authHeaders(),body:JSON.stringify({project:'AgentOps Final Demo v2'})});const x=await r.json();if(!r.ok){alert(x.error||('Run failed: '+r.status));return;}currentRunId=x.run_id||null;if(currentRunId)localStorage.setItem('AGENTOPS_RUN_ID',currentRunId);render(x)}
