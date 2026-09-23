@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 from typing import Mapping, Optional
@@ -61,6 +62,6 @@ def authorize_headers(headers: Mapping[str, str], bind_host: Optional[str] = Non
     provided = extract_api_key(headers)
     if not expected:
         return False, "authentication required: set AGENTOPS_API_KEY or bind to loopback for local demo"
-    if not provided or provided != expected:
+    if not provided or not hmac.compare_digest(provided, expected):
         return False, "unauthorized: provide Authorization: Bearer <key> or X-API-Key"
     return True, None
