@@ -42,9 +42,12 @@ form.addEventListener('submit', async (event) => {
 
   const payload = Object.fromEntries(['product_brief','audience','launch_date','constraints','available_assets'].map(id => [id, document.getElementById(id).value]));
   try {
+    const apiKey = localStorage.getItem('AGENTOPS_API_KEY') || window.AGENTOPS_API_KEY || '';
+    const headers = {'Content-Type': 'application/json', 'Accept': 'text/event-stream'};
+    if (apiKey) { headers['Authorization'] = 'Bearer ' + apiKey; headers['X-API-Key'] = apiKey; }
     const response = await fetch('/api/launch/stream', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json', 'Accept': 'text/event-stream'},
+      headers,
       body: JSON.stringify(payload),
     });
     if (!response.ok || !response.body) throw new Error(`Request failed (${response.status})`);
