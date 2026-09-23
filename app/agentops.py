@@ -1,9 +1,14 @@
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 import secrets
 
-SEVERITIES = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+from .severity import SEVERITIES, normalize_severity
+
+# Re-export for callers/tests that import from app.agentops
+__all__ = ["normalize_severity", "Finding", "AgentResult", "review_agent", "run_demo", "build_run_from_sdk_report"]
+
+SeverityLevel = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 
 
 @dataclass
@@ -15,6 +20,9 @@ class Finding:
     recommendation: str
     owner: str
     status: str = "OPEN"
+
+    def __post_init__(self):
+        self.severity = normalize_severity(self.severity)
 
 
 @dataclass
@@ -94,6 +102,9 @@ def observability_agent():
 
 def review_agent(results: List[AgentResult]):
     findings = [f for r in results for f in r.findings]
+    # Re-normalize defensively in case callers mutated Finding.severity after init.
+    for f in findings:
+        f.severity = normalize_severity(f.severity)
     critical = sum(f.severity == "CRITICAL" for f in findings)
     high = sum(f.severity == "HIGH" for f in findings)
     medium = sum(f.severity == "MEDIUM" for f in findings)
@@ -155,6 +166,7 @@ def build_run_from_sdk_report(project: str, report: Dict[str, Any]) -> Dict[str,
     """
     results: List[AgentResult] = []
     for item in report.get("reports", []):
+        # Finding.__post_init__ normalizes severity (unknown -> CRITICAL / fail-closed).
         findings = [Finding(**f) for f in item.get("findings", [])]
         results.append(_result(
             item.get("agent", "Unknown"),
